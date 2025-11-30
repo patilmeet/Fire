@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SnapShare - Photo Sharing App</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #888; 
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555; 
+        }
+
+        .glass-morphism {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        /* Loader */
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 4px solid #3b82f6;
+            width: 24px;
+            height: 24px;
+            -webkit-animation: spin 1s linear infinite; /* Safari */
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans h-screen flex flex-col overflow-hidden">
+
+    <!-- Navigation Bar -->
+    <nav class="glass-morphism fixed w-full z-50 top-0 px-4 py-3 flex justify-between items-center shadow-sm">
+        <div class="flex items-center gap-2">
+            <div class="bg-blue-600 text-white p-2 rounded-lg">
+                <i class="fa-solid fa-camera-retro"></i>
+            </div>
+            <h1 class="text-xl font-bold text-blue-600 tracking-tight">SnapShare</h1>
+        </div>
+        <div class="flex gap-2">
+            <div id="connection-status" class="flex items-center gap-1 px-2 py-1 rounded-full bg-red-100 text-red-600 text-xs font-medium" title="Connection Status">
+                <div class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+                <span id="status-text">Offline</span>
+            </div>
+            <button onclick="showInfoModal()" class="text-gray-500 hover:text-blue-600 transition p-2" title="Info">
+                <i class="fa-solid fa-circle-info text-lg"></i>
+            </button>
+        </div>
+    </nav>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 overflow-y-auto pt-20 pb-24 px-4" id="main-feed">
+        
+        <!-- Welcome Banner (shown if empty) -->
+        <div id="empty-state" class="hidden flex flex-col items-center justify-center h-[60vh] text-center p-6 opacity-70">
+            <i class="fa-solid fa-images text-6xl text-gray-300 mb-4"></i>
+            <h2 class="text-2xl font-semibold text-gray-600">No photos yet</h2>
+            <p class="text-gray-500 mt-2 max-w-xs">Tap the + button below to upload your first photo to the shared feed.</p>
+        </div>
+
+        <!-- Image Grid -->
+        <div id="image-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pb-10">
+            <!-- Images will be injected here by JS -->
+        </div>
+
+    </main>
+
+    <!-- Upload Floating Action Button -->
+    <div class="fixed bottom-6 right-6 z-40">
+        <label for="file-upload" class="cursor-pointer bg-blue-600 hover:bg-blue-700 text-white rounded-full w-14 h-14 flex items-center justify-center shadow-lg hover:shadow-xl transition transform hover:scale-105 active:scale-95">
+            <i class="fa-solid fa-plus text-2xl"></i>
+        </label>
+        <input id="file-upload" type="file" accept="image/*" class="hidden" onchange="handleFileUpload(event)">
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed bottom-24 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-4 py-2 rounded-full shadow-lg text-sm opacity-0 transition-opacity duration-300 pointer-events-none z-50">
+        Notification
+    </div>
+
+    <!-- Image Preview Modal -->
+    <div id="image-modal" class="fixed inset-0 z-[60] bg-black/90 hidden flex items-center justify-center p-4 opacity-0 transition-opacity duration-300">
+        <button onclick="closeImageModal()" class="absolute top-4 right-4 text-white text-2xl p-2 hover:text-gray-300 z-50">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+        <div class="relative max-w-4xl max-h-full w-full flex flex-col items-center">
+            <img id="modal-img" src="" alt="Full View" class="max-h-[80vh] max-w-full object-contain rounded-lg shadow-2xl">
+            
+            <div class="mt-4 flex gap-4 w-full justify-center">
+                <a id="download-link" href="#" download="snapshare-image.png" class="bg-white text-gray-900 px-6 py-2 rounded-full font-medium hover:bg-gray-100 transition flex items-center gap-2">
+                    <i class="fa-solid fa-download"></i> Download
+                </a>
+                <button onclick="deleteCurrentPhoto()" class="bg-red-500/20 hover:bg-red-500/40 text-red-400 border border-red-500/50 px-4 py-2 rounded-full transition flex items-center gap-2">
+                    <i class="fa-solid fa-trash"></i>
+                </button>
+            </div>
+            <p id="modal-date" class="text-gray-400 text-sm mt-2"></p>
+        </div>
+    </div>
+
+    <!-- Info Modal -->
+    <div id="info-modal" class="fixed inset-0 z-[60] bg-black/50 hidden flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl transform scale-95 transition-transform duration-200" id="info-modal-content">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-gray-800">About SnapShare</h2>
+                <button onclick="closeInfoModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+            <p class="text-gray-600 mb-4">
+                SnapShare allows you to upload and view photos. 
+            </p>
+            <div class="bg-blue-50 p-4 rounded-lg mb-4 border border-blue-100">
+                <h3 class="font-semibold text-blue-800 mb-1"><i class="fa-solid fa-circle-nodes mr-1"></i> Live Sync Enabled</h3>
+                <p class="text-sm text-blue-700">
+                    This app is connected to a <strong>decentralized relay network</strong>. 
+                    <br><br>
+                    Photos you upload are compressed and broadcast to other users currently online.
+                    <br><br>
+                    <strong>Note:</strong> As this uses a public demo network, photos may disappear after some time or if the network resets.
+                </p>
+            </div>
+            <button onclick="closeInfoModal()" class="w-full bg-blue-600 text-white py-2 rounded-lg font-semibold hover:bg-blue-700 transition">
+                Got it!
+            </button>
+        </div>
+    </div>
+
+
+
+    <script>
+        // State Management
+        let photos = [];
+        let currentViewingPhotoId = null;
+
+        // Initialization
+        document.addEventListener('DOMContentLoaded', () => {
+            loadPhotos();
+            renderPhotos();
+        });
+
+        // Load photos from LocalStorage
+        function loadPhotos() {
+            const stored = localStorage.getItem('snapshare_photos');
+            if (stored) {
+                try {
+                    photos = JSON.parse(stored);
+                } catch (e) {
+                    console.error("Failed to parse photos", e);
+                    photos = [];
+                }
+            }
+        }
+
+        // Save photos to LocalStorage
+        function savePhotos() {
+            try {
+                localStorage.setItem('snapshare_photos', JSON.stringify(photos));
+            } catch (e) {
+                if (e.name === 'QuotaExceededError') {
+                    showToast("Storage full! Delete some photos.", true);
+                }
+            }
+        }
+
+        // Handle File Upload
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            if (file.size > 2 * 1024 * 1024) { // 2MB limit to save LocalStorage space
+                showToast("File too large. Max 2MB.", true);
+                return;
+            }
+
+            showToast("Uploading...", false);
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const base64String = e.target.result;
+                
+                const newPhoto = {
+                    id: Date.now().toString(),
+                    src: base64String,
+                    date: new Date().toLocaleString(),
+                    name: file.name
+                };
+
+                photos.unshift(newPhoto); // Add to beginning
+                savePhotos();
+                renderPhotos();
+                showToast("Photo uploaded successfully!");
+                
+                // Reset input
+                event.target.value = '';
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // Render Gallery
+        function renderPhotos() {
+            const grid = document.getElementById('image-grid');
+            const emptyState = document.getElementById('empty-state');
+
+            grid.innerHTML = '';
+
+            if (photos.length === 0) {
+                emptyState.classList.remove('hidden');
+            } else {
+                emptyState.classList.add('hidden');
+                
+                photos.forEach(photo => {
+                    const card = document.createElement('div');
+                    card.className = 'bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-md transition cursor-pointer relative group aspect-square';
+                    card.onclick = () => openImageModal(photo.id);
+
+                    card.innerHTML = `
+                        <img src="${photo.src}" class="w-full h-full object-cover transform group-hover:scale-105 transition duration-500" loading="lazy" alt="User photo">
+                        <div class="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors duration-300"></div>
+                    `;
+                    grid.appendChild(card);
+                });
+            }
+        }
+
+        // Modal Functions
+        function openImageModal(id) {
+            const photo = photos.find(p => p.id === id);
+            if (!photo) return;
+
+            currentViewingPhotoId = id;
+            const modal = document.getElementById('image-modal');
+            const img = document.getElementById('modal-img');
+            const dlLink = document.getElementById('download-link');
+            const dateEl = document.getElementById('modal-date');
+
+            img.src = photo.src;
+            dlLink.href = photo.src;
+            dlLink.download = `snapshare-${photo.id}.png`;
+            dateEl.textContent = `Uploaded: ${photo.date}`;
+
+            modal.classList.remove('hidden');
+            // Small delay to allow display block to apply before opacity transition
+            setTimeout(() => {
+                modal.classList.remove('opacity-0');
+            }, 10);
+        }
+
+        function closeImageModal() {
+            const modal = document.getElementById('image-modal');
+            modal.classList.add('opacity-0');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                currentViewingPhotoId = null;
+            }, 300);
+        }
+
+        function deleteCurrentPhoto() {
+            if (!currentViewingPhotoId) return;
+            
+            if(confirm("Are you sure you want to delete this photo?")) {
+                photos = photos.filter(p => p.id !== currentViewingPhotoId);
+                savePhotos();
+                renderPhotos();
+                closeImageModal();
+                showToast("Photo deleted.");
+            }
+        }
+
+        // Info Modal
+        function showInfoModal() {
+            const modal = document.getElementById('info-modal');
+            const content = document.getElementById('info-modal-content');
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                content.classList.remove('scale-95');
+                content.classList.add('scale-100');
+            }, 10);
+        }
+
+        function closeInfoModal() {
+            const modal = document.getElementById('info-modal');
+            const content = document.getElementById('info-modal-content');
+            content.classList.remove('scale-100');
+            content.classList.add('scale-95');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 200);
+        }
+
+        // Toast Notification
+        let toastTimeout;
+        function showToast(message, isError = false) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `fixed bottom-24 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-full shadow-xl text-sm font-medium transition-all duration-300 z-50 ${
+                isError ? 'bg-red-600 text-white' : 'bg-gray-900 text-white'
+            }`;
+            
+            toast.classList.remove('opacity-0', 'translate-y-4');
+            
+            clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-4');
+            }, 3000);
+        }
+
+        // Close modal on outside click
+        document.getElementById('image-modal').addEventListener('click', function(e) {
+            if (e.target === this) closeImageModal();
+        });
+        
+        document.getElementById('info-modal').addEventListener('click', function(e) {
+            if (e.target === this) closeInfoModal();
+        });
+
+        // Data Modal Functions
+        function showDataModal() {
+            const modal = document.getElementById('data-modal');
+            const content = document.getElementById('data-modal-content');
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                content.classList.remove('scale-95');
+                content.classList.add('scale-100');
+            }, 10);
+        }
+
+        function closeDataModal() {
+            const modal = document.getElementById('data-modal');
+            const content = document.getElementById('data-modal-content');
+            content.classList.remove('scale-100');
+            content.classList.add('scale-95');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 200);
+        }
+
+        document.getElementById('data-modal').addEventListener('click', function(e) {
+            if (e.target === this) closeDataModal();
+        });
+
+        // Export Data
+        function exportData() {
+            if (photos.length === 0) {
+                showToast("No photos to export!", true);
+                return;
+            }
+            
+            const dataStr = JSON.stringify(photos);
+            const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+            
+            const exportFileDefaultName = 'snapshare-backup.json';
+            
+            const linkElement = document.createElement('a');
+            linkElement.setAttribute('href', dataUri);
+            linkElement.setAttribute('download', exportFileDefaultName);
+            linkElement.click();
+            
+            showToast("Backup file downloaded!");
+            closeDataModal();
+        }
+
+        // Import Data
+        function importData(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const importedPhotos = JSON.parse(e.target.result);
+                    
+                    if (!Array.isArray(importedPhotos)) {
+                        throw new Error("Invalid data format");
+                    }
+
+                    // Simple validation
+                    const validPhotos = importedPhotos.filter(p => p.id && p.src);
+                    
+                    if (validPhotos.length === 0) {
+                        throw new Error("No valid photos found");
+                    }
+
+                    // Merge strategies: We'll prepend imported photos, removing duplicates based on ID
+                    const existingIds = new Set(photos.map(p => p.id));
+                    let addedCount = 0;
+
+                    validPhotos.forEach(photo => {
+                        if (!existingIds.has(photo.id)) {
+                            photos.push(photo);
+                            existingIds.add(photo.id);
+                            addedCount++;
+                        }
+                    });
+
+                    // Re-sort by date (optional, assuming newer IDs are higher or we rely on push order)
+                    // photos.sort((a, b) => b.id - a.id); 
+
+                    savePhotos();
+                    renderPhotos();
+                    
+                    if (addedCount > 0) {
+                        showToast(`Imported ${addedCount} new photos!`);
+                    } else {
+                        showToast("Photos already exist in gallery.");
+                    }
+                    closeDataModal();
+
+                } catch (error) {
+                    console.error(error);
+                    showToast("Failed to import data. Invalid file.", true);
+                }
+                
+                // Reset input
+                event.target.value = '';
+            };
+            reader.readAsText(file);
+        }
+
+    </script>
+</body>
+</html>
